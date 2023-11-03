@@ -11,9 +11,11 @@ app = Flask(__name__)
 fe = FeatureExtractor()
 features = []
 img_paths = []
+img_names = []
 for feature_path in Path("./static/feature").glob("*.npy"):
     features.append(np.load(feature_path))
     img_paths.append(Path("./static/img") / (feature_path.stem + ".jpg"))
+    img_names.append(feature_path.stem)
 features = np.array(features)
 
 
@@ -21,23 +23,53 @@ features = np.array(features)
 def index():
     if request.method == 'POST':
         file = request.files['query_img']
+        if (file):
+            # Save query image
+            img = Image.open(file.stream)  # PIL image
+            uploaded_img_path = "./static/uploaded/tempImage.png"
+            img.save(uploaded_img_path)
 
-        # Save query image
-        img = Image.open(file.stream)  # PIL image
-        uploaded_img_path = "./static/uploaded/" + datetime.now().isoformat().replace(":", ".") + "_" + file.filename
-        img.save(uploaded_img_path)
+            # Run search
+            query = fe.extract(img)
+            dists = np.linalg.norm(features-query, axis=1)  # L2 distances to features
+            ids = np.argsort(dists)[:32]  # Top 32 results
+            #scores = [(img_names[id], img_paths[id]) for id in ids]
+            
+            scores = [[] for i in range(4)]
+            incre = 0
+            for i, id in enumerate(ids):
+                scores[incre].append((img_names[id], img_paths[id]))
+                incre += 1
+                if incre % 4 == 0:
+                    incre = 0
 
-        # Run search
-        query = fe.extract(img)
-        dists = np.linalg.norm(features-query, axis=1)  # L2 distances to features
-        ids = np.argsort(dists)[:30]  # Top 30 results
-        scores = [(dists[id], img_paths[id]) for id in ids]
-
-        return render_template('index.html',
-                               query_path=uploaded_img_path,
-                               scores=scores)
+            return render_template('index.html',
+                                query_path=uploaded_img_path,
+                                scores=scores)
+        
+        elif request.form['txt_search'] != '':
+            scores = [[] for i in range(4)]
+            incre = 0
+            for i,p in enumerate(img_paths):
+                txt_search = request.form['txt_search'].lower()
+                if txt_search in img_names[i].lower():
+                    scores[incre].append((img_names[i], p))
+                    incre += 1
+                    if incre % 4 == 0:
+                        incre = 0
+            #scores = [(img_names[i], p) for i,p in enumerate(img_paths) if txt_search in img_names[i].lower()]
+            return render_template('index.html', scores=scores)
     else:
-        return render_template('index.html')
+        scores = [[] for i in range(4)]
+        incre = 0
+        for i,p in enumerate(img_paths):
+            scores[incre].append((img_names[i], p))
+            incre += 1
+            if incre % 4 == 0:
+                incre = 0
+            if len(scores[3]) > 32:
+                break
+        return render_template('index.html', scores=scores)
 
 
 if __name__=="__main__":
